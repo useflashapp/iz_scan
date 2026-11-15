@@ -32,19 +32,60 @@ public class IzScanPlugin: NSObject, FlutterPlugin, SimpleScanDelegate {
         ScanViewController.configure(apiKey: apiKey)
     }
 
-    private func startCardScan(result: @escaping FlutterResult) {
-        print("LET SCANNING...");
-        scanResult = result
+    private func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }
 
-        guard let rootViewController = UIApplication.shared.delegate?.window??.rootViewController else {
-            return
+        for scene in scenes {
+            if let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first,
+               let root = window.rootViewController {
+                var top = root
+                while let presented = top.presentedViewController {
+                    top = presented
+                }
+                return top
+            }
         }
 
-        let vc = CustomSimpleScanViewController()
-        vc.modalPresentationStyle = .fullScreen
-        vc.delegate = self
+        if let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) ?? UIApplication.shared.windows.first,
+           let root = window.rootViewController {
+            var top = root
+            while let presented = top.presentedViewController {
+                top = presented
+            }
+            return top
+        }
 
-        rootViewController.present(vc, animated: true)
+        return nil
+    }
+
+    private func startCardScan(result: @escaping FlutterResult) {
+        scanResult = result
+
+        let presentScan: () -> Void = { [weak self] in
+            guard let self = self else { return }
+            guard let presenter = self.topViewController() else {
+                self.scanResult?(FlutterError(
+                    code: "NO_VIEW_CONTROLLER",
+                    message: "No view controller available to present card scan",
+                    details: nil
+                ))
+                self.scanResult = nil
+                return
+            }
+
+            let vc = CustomSimpleScanViewController()
+            vc.modalPresentationStyle = .fullScreen
+            vc.delegate = self
+            presenter.present(vc, animated: true)
+        }
+
+        if Thread.isMainThread {
+            presentScan()
+        } else {
+            DispatchQueue.main.async(execute: presentScan)
+        }
     }
 
     // MARK: - SimpleScanDelegate methods
@@ -52,6 +93,7 @@ public class IzScanPlugin: NSObject, FlutterPlugin, SimpleScanDelegate {
     public func userDidCancelSimple(_ scanViewController: SimpleScanViewController) {
         scanViewController.dismiss(animated: true)
         scanResult?(nil)
+        scanResult = nil
     }
     
     public func userDidScanCardSimple(_ scanViewController: SimpleScanViewController, creditCard: CreditCard) {
@@ -69,7 +111,6 @@ public class IzScanPlugin: NSObject, FlutterPlugin, SimpleScanDelegate {
 
         scanResult?(cardInfo)
         scanViewController.dismiss(animated: true)
+        scanResult = nil
     }
 }
-
-
